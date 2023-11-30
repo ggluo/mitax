@@ -1,0 +1,18 @@
+[project]
+name = "mitax"
+version = "0.0.1"
+description = "Medical Imaging Toolbox with Jax (MITAX)"
+readme = "README.md"
+
+requires-python = ">=3.7"
+license = {file = "LICENSE.txt"}
+
+keywords = ["medical imaging", "image reconstruction", "inverse problems", "generative models", "diffusion models"]
+
+authors = [
+  {name = "Guanxiong Luo", email = "luoguan5@gmail.com" } # Optional
+]
+
+dependencies = [ # Optional
+  "peppercorn"
+]
