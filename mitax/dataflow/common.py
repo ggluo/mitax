@@ -11,9 +11,9 @@ import six
 import tqdm
 from termcolor import colored
 
-from spreco.common import logger
-from spreco.common.utils import get_rng
-from spreco.dataflow.base import DataFlow, DataFlowReentrantGuard, ProxyDataFlow, RNGDataFlow
+from mitax.misc import logger
+from mitax.misc.utils import get_rng
+from mitax.dataflow.base import DataFlow, DataFlowReentrantGuard, ProxyDataFlow, RNGDataFlow
 from tqdm import tqdm
 
 try:

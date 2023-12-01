@@ -4,9 +4,9 @@ import threading
 
 from six.moves import queue
 
-from miax.dataflow.concurrency import StoppableThread
-from miax.dataflow.base import DataFlow, DataFlowReentrantGuard, ProxyDataFlow, RNGDataFlow
-from miax.dataflow.common import RepeatedData, BatchData
+from mitax.dataflow.concurrency import StoppableThread
+from mitax.dataflow.base import DataFlow, DataFlowReentrantGuard, ProxyDataFlow, RNGDataFlow
+from mitax.dataflow.common import RepeatedData, BatchData
 import numpy as np
 
 __all__ = ['MultiThreadMapData']
