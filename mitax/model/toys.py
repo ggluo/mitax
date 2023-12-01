@@ -1,6 +1,6 @@
 import jax
 from flax import linen as nn
-
+from registry import registered_classes
 
 
 class mnist_cnn(nn.Module):
@@ -19,3 +19,5 @@ class mnist_cnn(nn.Module):
         x = nn.relu(x)
         x = nn.Dense(features=10)(x)
         return x
+
+registered_classes['mnist_cnn'] = mnist_cnn

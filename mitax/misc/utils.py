@@ -6,6 +6,8 @@ import tempfile
 import subprocess
 import datetime
 
+from mitax.model.registry import registered_classes
+
 def get_class_by_name(module, class_name):
     """
     Dynamically imports a module and retrieves a class by name.
@@ -31,7 +33,24 @@ def get_class_by_name(module, class_name):
     except (ImportError, AttributeError):
         raise ValueError(f"Class {class_name} not found in module {module} or module {module} does not exist.")
 
+def get_registered_class(name):
+    """
+    Retrieves a class from the registered_classes dictionary.
 
+    Args:
+        name (str): The name of the class to retrieve.
+
+    Returns:
+        class: The class object.
+
+    Raises:
+        ValueError: If the class is not found in the registered_classes dictionary.
+    """
+    try:
+        return registered_classes[name]
+    
+    except KeyError:
+        raise ValueError(f"Class {name} not found in registered_classes.")
 
 def load_config(path):
     """
