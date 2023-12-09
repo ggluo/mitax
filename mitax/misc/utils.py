@@ -4,9 +4,8 @@ import yaml
 import numpy as np
 import tempfile
 import subprocess
-import datetime
+from datetime import datetime
 
-from mitax.model.registry import registered_classes
 
 def get_class_by_name(module, class_name):
     """
@@ -33,24 +32,6 @@ def get_class_by_name(module, class_name):
     except (ImportError, AttributeError):
         raise ValueError(f"Class {class_name} not found in module {module} or module {module} does not exist.")
 
-def get_registered_class(name):
-    """
-    Retrieves a class from the registered_classes dictionary.
-
-    Args:
-        name (str): The name of the class to retrieve.
-
-    Returns:
-        class: The class object.
-
-    Raises:
-        ValueError: If the class is not found in the registered_classes dictionary.
-    """
-    try:
-        return registered_classes[name]
-    
-    except KeyError:
-        raise ValueError(f"Class {name} not found in registered_classes.")
 
 def load_config(path):
     """
@@ -205,8 +186,50 @@ def bart(nargout, cmd, *args, return_str=False):
 
     return output
 
-_RNG_SEED = None
+def dataloader(data, num_thread, map_func, batch_size, strict=True, factor=10):
+    """
+    A function that creates a data loader for processing data in parallel.
 
+    Args:
+        data: the data to be processed, which can be a list, tuple, or DataFlow object.
+        num_thread: The number of threads to use for parallel processing.
+        map_func: The function to apply to each data item.
+        batch_size: the returned batch size.
+        strict: 
+
+    Returns:
+        A data loader that fetch the input data in parallel.
+
+    """
+    from mitax.dataflow.common import BatchData
+    from mitax.dataflow.parallel_map import MultiThreadMapData
+
+    d1 = MultiThreadMapData(data, num_thread, map_func, buffer_size=batch_size*factor, strict=strict)
+    return BatchData(d1, batch_size, use_list=False)
+
+
+def create_folder(save_path, time=True):
+    """
+    Create a folder for logs.
+
+    Parameters:
+    save_path (str): The path where the folder will be created.
+    time (bool, optional): Whether to include the current timestamp in the folder name. 
+                           Defaults to True.
+
+    Returns:
+    str: The path of the created folder.
+    """
+    if time:
+        log_path = os.path.join(save_path, datetime.now().strftime("%Y%m%d-%H%M%S"))
+    else:
+        log_path = save_path
+
+    if not os.path.exists(log_path):
+        os.makedirs(log_path)
+    return log_path
+
+_RNG_SEED = None
 
 def fix_rng_seed(seed):
     """

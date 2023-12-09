@@ -1,0 +1,6 @@
+build
+*.pyc
+mitax.egg-info
+mnist_data
+.vscode
+log

@@ -1,5 +1,7 @@
 ## TODO
 
-- [ ] class registry pattern
 - [ ] loss functions
-- [ ] dataloader
+- [ ] fully recover and save the state
+- [ ] learning schedule and optimizer
+- [ ] parallel training
+- [ ] simplify dataloader and dataflow

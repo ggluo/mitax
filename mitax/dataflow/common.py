@@ -102,6 +102,7 @@ class BatchData(ProxyDataFlow):
         assert self.batch_size > 0
         self.remainder = remainder
         self.use_list = use_list
+        self.reset_state()
 
     def __len__(self):
         ds_size = len(self.ds)
