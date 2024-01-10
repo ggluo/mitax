@@ -1,4 +1,4 @@
-model_name: mitax.model.toys.mnist_cnn
+net_name: mitax.model.toys.mnist_cnn
 loss_name: mitax.model.classifier.cross_entropy
 batch_size: 32
 input_shape: [28,28]
