@@ -187,7 +187,10 @@ class BatchData(ProxyDataFlow):
                 else:
                     result[key] = BatchData._batch_numpy(data_list)
         else:
-            return data_holder
+            if use_list:
+                return data_holder
+            else:
+                return BatchData._batch_numpy(data_holder)
         return result
 
 
