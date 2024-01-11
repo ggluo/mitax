@@ -1,0 +1,33 @@
+net_name: mitax.model.unet.ncsnpp
+net_hparams: {
+  dropout: 0.1,
+  scale_out: False,
+  nonlinearity: 'swish',
+  nr_filters: 128,
+  ch_mult: [1, 2, 2, 2],
+  nr_res_blocks: 4,
+  attn_resolutions: [16,],
+  resamp_with_conv: True,
+  fir: True,
+  fir_kernel: [1, 3, 3, 1],
+  skip_rescale: True,
+  resblock_type: 'biggan',
+  progressive: 'none',
+  progressive_input: 'residual',
+  progressive_combine: 'sum',
+  init_scale: 0.,
+  fourier_scale: 16,
+  center_x: False
+}
+
+loss_name: mitax.model.dm.smld_x
+loss_params: {sigma_max: 5.0, sigma_min: 0.01, continuous: True}
+
+batch_size: 10
+optimizer: adam
+opt_hparams: {lr: 0.0001}
+
+logdir: /home/gluo/mitax/examples/log
+
+num_thread: 10
+epoch: 1000

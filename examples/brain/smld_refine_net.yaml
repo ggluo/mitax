@@ -1,0 +1,14 @@
+net_name: mitax.model.refine_net.small
+net_hparams: {chns: 2, nr_filters: 64}
+
+loss_name: mitax.model.dm.smld
+loss_params: {sigma_max: 5.0, sigma_min: 0.01, continuous: True}
+
+batch_size: 10
+optimizer: adam
+opt_hparams: {lr: 0.0001}
+
+logdir: /home/gluo/mitax/examples/log
+
+num_thread: 10
+epoch: 1000
