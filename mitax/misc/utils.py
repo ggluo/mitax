@@ -6,6 +6,7 @@ import tempfile
 import subprocess
 from datetime import datetime
 import jax
+import jax.numpy as jnp
 
 def get_class_by_name(module, class_name):
     """
@@ -89,7 +90,7 @@ def readcfl(name):
     d = open(name + ".cfl", "r")
     a = np.fromfile(d, dtype=np.complex64, count=n)
     d.close()
-    return a.reshape(dims)
+    return a.reshape(dims, order='F')
 
 def writecfl(name, array):
     """
@@ -102,6 +103,8 @@ def writecfl(name, array):
     Returns:
     None
     """
+    if not isinstance(array, np.ndarray):
+        array = np.array(array)
 
     h = open(name + ".hdr", "w")
     h.write('# Dimensions\n')
@@ -317,10 +320,20 @@ def get_rng(obj=None):
     return np.random.RandomState(seed)
 
 def float2cplx(float_in):
-    return np.array(float_in[...,0]+1.0j*float_in[...,1], dtype='complex64')
+    if isinstance(float_in, np.ndarray):
+        return np.array(float_in[...,0]+1.0j*float_in[...,1], dtype='complex64')
+    elif isinstance(float_in, jnp.ndarray):
+        return jnp.array(float_in[...,0]+1.0j*float_in[...,1], dtype='complex64')
+    else:
+        raise ValueError('Input must be numpy or jax array')
 
 def cplx2float(cplx_in):
-    return np.array(np.stack((cplx_in.real, cplx_in.imag), axis=-1), dtype='float32')
+    if isinstance(cplx_in, np.ndarray):
+        return np.array(np.stack((cplx_in.real, cplx_in.imag), axis=-1), dtype='float32')
+    elif isinstance(cplx_in, jnp.ndarray):
+        return jnp.array(jnp.stack((cplx_in.real, cplx_in.imag), axis=-1), dtype='float32')
+    else:
+        raise ValueError('Input must be numpy or jax array')
 
 def batch_add(a, b):
   return jax.vmap(lambda a, b: a + b)(a, b)

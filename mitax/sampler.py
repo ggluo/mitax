@@ -178,7 +178,7 @@ class AncestralSampler(base):
                 x_val, x_mean = self.update_step(x_val, jnp.array([t_i for _ in range(nr_samples)]), subkey)
                 
                 if self.cond_func is not None:
-                    pass # Not implemented yet
+                    x_val = self.cond_func(x_val)
 
             xs.append(x_val)
             xs_mean.append(x_mean)
