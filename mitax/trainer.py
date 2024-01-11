@@ -13,8 +13,8 @@ class trainer:
     The `Trainer` class is responsible for initializing the trainer and managing the training process.
 
     Args:
-        model_name (str): The module and class name of the model.
-        model_hparams (dict): Hyperparameters for the model.
+        net_name (str): The module and class name of the net.
+        net_hparams (dict): Hyperparameters for the net.
         optimizer_name (str): The name of the optimizer.
         optimizer_hparams (dict): Hyperparameters for the optimizer.
         init_input (Any): The initial input for the trainer.
@@ -22,59 +22,59 @@ class trainer:
     """
 
     def __init__(self,
-                 model_name: str,
-                 model_hparams: dict,
+                 net_name: str,
+                 net_hparams: dict,
                  loss_name: str,
                  loss_params: dict,
                  optimizer_name: str,
                  optimizer_hparams: dict,
                  init_input: Any,
                  logdir: str,
-                 seed=1234):
+                 rng_key: Any = None):
             """
             Initializes the Trainer class.
 
             Args:
-                model_name (str): The module and class name of the model.
-                model_hparams (dict): Hyperparameters for the model.
+                net_name (str): The module and class name of the net.
+                net_hparams (dict): Hyperparameters for the net.
                 optimizer_name (str): The name of the optimizer.
                 optimizer_hparams (dict): Hyperparameters for the optimizer.
                 init_input (Any): The initial input for the trainer.
                 logdir (str): The directory path to save logs.
-                seed (int, optional): The seed value for random number generation. Defaults to 1234.
+                rng_key (int, optional): for random funcs in dropout and diffusion
             """
             super().__init__()
 
-            self.model_name        = model_name
-            self.model_hparams     = model_hparams
+            self.net_name        = net_name
+            self.net_hparams     = net_hparams
             self.loss_name         = loss_name
             self.loss_params       = loss_params
             self.optimizer_name    = optimizer_name
             self.optimizer_hparams = optimizer_hparams
-            self.seed              = seed
+            self.rng_key           = rng_key
 
-            self.init_model(self.model_name, self.model_hparams, init_input)
+            self.init_net(self.net_name, self.net_hparams, init_input)
             self.logdir = utils.create_folder(logdir)
             self.writer = SummaryWriter(self.logdir)
             self.orbax_checkpointer = ocp.PyTreeCheckpointer()
 
-    def init_model(self, name, params, init_input):
+    def init_net(self, name, params, init_input):
         """
-        Initializes the model with the given name, parameters, and input.
+        Initializes the net with the given name, parameters, and input.
 
         Args:
-            name (tuple): A tuple containing the module name and class name of the model.
-            params (dict): A dictionary of parameters to be passed to the model constructor.
-            init_input: The input used for initializing the model.
+            name (tuple): A tuple containing the module name and class name of the net.
+            params (dict): A dictionary of parameters to be passed to the net constructor.
+            init_input: The input used for initializing the net.
 
         Returns:
             None
         """
         module_name, class_name = name.rsplit('.', 1)
 
-        self.model = utils.get_class_by_name(module_name, class_name)(**params)
-        init_rng   = jax.random.PRNGKey(self.seed)
-        variables  = self.model.init(init_rng, init_input, train=True)
+        self.net = utils.get_class_by_name(module_name, class_name)(**params)
+        self.rng_key, init_rng = jax.random.split(self.rng_key)
+        variables              = self.net.init(init_rng, **init_input, train=False)
         self.init_params       = variables['params']
         self.state             = None
 
@@ -94,20 +94,20 @@ class trainer:
         opt_class = utils.get_class_by_name('optax', opt_name)
 
         # decrease the learning rate by a factor of 0.1 after 60% and 85% of the training
-        lr_schedule = optax.piecewise_constant_schedule(
-            init_value=self.optimizer_hparams.pop('lr'),
-            boundaries_and_scales=
-                {int(num_steps_per_epoch*num_epochs*0.6): 0.1,
-                    int(num_steps_per_epoch*num_epochs*0.85): 0.1}
-        )
+        #lr_schedule = optax.piecewise_constant_schedule(
+        #    init_value=self.optimizer_hparams.pop('lr'),
+        #    boundaries_and_scales=
+        #        {int(num_steps_per_epoch*num_epochs*0.6): 0.1,
+        #            int(num_steps_per_epoch*num_epochs*0.85): 0.1}
+        #)
 
         # Clip gradients at max value, and evt. apply weight decay
-        transf = [optax.clip(1.0)]
+        # transf = [optax.clip(1.0)]
 
-        if opt_class == optax.sgd and 'weight_decay' in self.optimizer_hparams: 
-            transf.append(optax.add_decayed_weights(self.optimizer_hparams.pop('weight_decay')))
+        #if opt_class == optax.sgd and 'weight_decay' in self.optimizer_hparams: 
+        #    transf.append(optax.add_decayed_weights(self.optimizer_hparams.pop('weight_decay')))
 
-        return optax.chain(*transf,opt_class(lr_schedule, **self.optimizer_hparams))
+        return opt_class(self.optimizer_hparams.pop('lr'), **self.optimizer_hparams)
 
     def save_model(self, step):
         """
@@ -119,7 +119,7 @@ class trainer:
         ckpt = {'model': self.state}
         save_args = orbax_utils.save_args_from_target(ckpt)
         try:
-            self.orbax_checkpointer.save(self.logdir+ '/' + self.model_name + '_' + str(step), ckpt, save_args=save_args)
+            self.orbax_checkpointer.save(self.logdir+ '/' + self.net_name + '_' + str(step), ckpt, save_args=save_args)
 
         except:
             raise ValueError('Failed to save model')
@@ -132,27 +132,26 @@ class trainer:
             the restored training state.
         """
         try:
-            a = self.orbax_checkpointer.restore(path)
-            return a
+            return self.orbax_checkpointer.restore(path)
         except:
             raise ValueError('Failed to load model')
 
     def create_functions(self):
      
-        def init_loss(name, model, params, loss_params, batch, train):
+        def init_loss(name, apply_fn, params, loss_params, batch, train):
             module_name, class_name = name.rsplit('.', 1)
-            loss = utils.get_class_by_name(module_name, class_name)(loss_params)
-            return loss(model, params, batch, train)
+            loss = utils.get_class_by_name(module_name, class_name)(**loss_params)
+            return loss(apply_fn, params, batch, train)
         
         def train_step(state, batch):
-            loss_fn = lambda params: init_loss(self.loss_name, self.model, params, self.loss_params, batch, train=True)
+            loss_fn = lambda params: init_loss(self.loss_name, self.state.apply_fn, params, self.loss_params, batch, train=True)
             ret, grads = jax.value_and_grad(loss_fn, has_aux=True)(state.params) # ret[0] is loss, ret[1] is metric
             ret[1]['loss'] = ret[0]
             state = state.apply_gradients(grads=grads)
             return state, ret[1]
 
         def test_step(state, batch):
-            loss, metric = init_loss(self.loss_name, self.model, state.params, self.loss_params, batch, train=True)
+            loss, metric = init_loss(self.loss_name, self.state.apply_fn, state.params, self.loss_params, batch, train=False)
             metric['loss'] = loss
             return metric
         
@@ -190,7 +189,7 @@ class trainer:
             print(k + ': {:0.4f}'.format(v), end=' ')
         print()
 
-    def kernel(self, dataloader, train=True, log_interval=100):
+    def kernel(self, dataloader, train=True, log_interval=2):
         """
         The training loop for one epoch.
 
@@ -205,6 +204,13 @@ class trainer:
         lm = []
 
         for inner_step, batch in enumerate(dataloader):
+
+            if not isinstance(batch, (tuple, list)):
+                batch = [batch,]
+
+            if self.rng_key is not None:
+                self.rng_key, subkey = jax.random.split(self.rng_key)
+                batch.append(subkey)
 
             if train:
                 self.state, metric = self.train_step(self.state, batch)
@@ -239,7 +245,7 @@ class trainer:
             state_dict = self.load_model(pretrained_model)
             self.state = state_dict['model']
 
-        self.state = train_state.TrainState.create(apply_fn = self.model.apply,
+        self.state = train_state.TrainState.create(apply_fn = self.net.apply,
                                                 params = self.init_params if self.state is None else self.state['params'],
                                                 tx     = self.init_optimizer(epochs, num_steps_per_epoch))
         self.create_functions()

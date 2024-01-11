@@ -5,7 +5,7 @@ import numpy as np
 import tempfile
 import subprocess
 from datetime import datetime
-
+import jax
 
 def get_class_by_name(module, class_name):
     """
@@ -208,6 +208,23 @@ def dataloader(data, num_thread, map_func, batch_size, strict=True, factor=10):
     return BatchData(d1, batch_size, use_list=False)
 
 
+def fileflow(files, shuffle=False):
+    """
+    A data flow class for iterating over a list of files.
+
+    Args:
+        files (list): List of file names.
+        shuffle (bool): Whether to shuffle the file names.
+
+    Returns:
+        Iterator: An iterator that yields file names.
+    """
+    
+    from mitax.dataflow.parallel_map import fileflow as fileflow_
+
+    return fileflow_(files, shuffle)
+
+
 def create_folder(save_path, time=True):
     """
     Create a folder for logs.
@@ -228,6 +245,35 @@ def create_folder(save_path, time=True):
     if not os.path.exists(log_path):
         os.makedirs(log_path)
     return log_path
+
+def list_files(path, ext=None, sort=True):
+    """
+    List all files in a directory.
+
+    Args:
+        path (str): The path to the directory.
+        ext (str, optional): The extension of the files to be listed. Defaults to None.
+        sort (bool, optional): Whether to sort the files. Defaults to True.
+
+    Returns:
+        list: A list of file names.
+    """
+    if ext is None:
+        files = [os.path.join(path, f) for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))]
+    else:
+        files = [os.path.join(path, f) for f in os.listdir(path) if os.path.isfile(os.path.join(path, f)) and f.endswith(ext)]
+    if sort:
+        files.sort()
+    return files
+
+def read_filelist(filename):
+    """
+    Read a file containing a list of file names.
+    """
+    with open(filename) as f:
+        lines = [line.rstrip() for line in f]
+        return lines
+
 
 _RNG_SEED = None
 
@@ -269,3 +315,15 @@ def get_rng(obj=None):
     if _RNG_SEED is not None:
         seed = _RNG_SEED
     return np.random.RandomState(seed)
+
+def float2cplx(float_in):
+    return np.array(float_in[...,0]+1.0j*float_in[...,1], dtype='complex64')
+
+def cplx2float(cplx_in):
+    return np.array(np.stack((cplx_in.real, cplx_in.imag), axis=-1), dtype='float32')
+
+def batch_add(a, b):
+  return jax.vmap(lambda a, b: a + b)(a, b)
+
+def batch_mul(a, b):
+  return jax.vmap(lambda a, b: a * b)(a, b)
