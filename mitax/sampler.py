@@ -147,11 +147,11 @@ class AncestralSampler(base):
             
             x_mean = x - drift
             x      = x_mean + jax.random.normal(key, jnp.shape(x))*diffusion
-            return x, x_mean
+            return x, x_mean, jnp.squeeze(diffusion)
         
         self.update_step = jax.jit(update_step)
 
-    def __call__(self, x_init, inner_steps=1):
+    def __call__(self, x_init, inner_steps=1, save_evol=False):
         """
         Perform the sampling process.
 
@@ -167,23 +167,28 @@ class AncestralSampler(base):
         """
         x_val     = x_init
 
-        xs      = []
-        xs_mean = []
+        if save_evol:
+            xs      = []
+            xs_mean = []
 
         nr_samples = jnp.shape(x_init)[0]
 
         for t_i in tqdm.tqdm(jnp.linspace(self.dm.T, self.dm.eps, self.dm.N)):
             for _ in range(inner_steps):
                 self.rng_key, subkey = jax.random.split(self.rng_key)
-                x_val, x_mean = self.update_step(x_val, jnp.array([t_i for _ in range(nr_samples)]), subkey)
+                x_val, x_mean, sig = self.update_step(x_val, jnp.array([t_i for _ in range(nr_samples)]), subkey)
                 
                 if self.cond_func is not None:
-                    x_val = self.cond_func(x_val)
+                    x_val = self.cond_func(x_val, sig)
 
-            xs.append(x_val)
-            xs_mean.append(x_mean)
-
-        return xs, xs_mean
+            if save_evol:
+                xs.append(x_val)
+                xs_mean.append(x_mean)
+            
+        if save_evol:
+            return xs, xs_mean
+        else:
+            return x_val, x_mean
     
 def progressive_sampling(sampler, Ns, sigmaxs, rhos, x_init, inner_steps=1):
 
@@ -197,6 +202,6 @@ def progressive_sampling(sampler, Ns, sigmaxs, rhos, x_init, inner_steps=1):
         sampler.dm.set_d_step(Ns[i])
         sampler.create_functions()
         _, image = sampler(x_val, inner_steps)
-        x_val    = image[-1]
+        x_val    = image
 
     return image
