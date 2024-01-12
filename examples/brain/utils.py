@@ -8,7 +8,6 @@ import numpy as np
 
 savecfl  = lambda p, a: utils.writecfl(p, utils.float2cplx(a)) if a.shape[-1] == 2 else utils.writecfl(p, a)
 
-
 def subplot(ax, img, title, cmap, interpolation, vmin, vmax):
     ax.imshow(img, cmap=cmap, interpolation=interpolation, vmin=vmin, vmax=vmax)
     ax.set_title(title)
