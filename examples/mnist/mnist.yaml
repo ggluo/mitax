@@ -3,8 +3,8 @@ loss_name: mitax.model.classifier.cross_entropy
 batch_size: 32
 input_shape: [28,28]
 optimizer: adam
-lr: 0.0001
+optimizer_hparams: {lr: 0.0001, ema_decay: 0.99}
 
-logdir: ./log
+logdir: /home/gluo/mitax/examples/log
 
 num_thread: 10

@@ -30,7 +30,7 @@ class trainer:
                  optimizer_hparams: dict,
                  init_input: Any,
                  logdir: str,
-                 rng_key: Any = None):
+                 rng_key: Any = jax.random.PRNGKey(1234)):
             """
             Initializes the Trainer class.
 
@@ -57,6 +57,10 @@ class trainer:
             self.logdir = utils.create_folder(logdir)
             self.writer = SummaryWriter(self.logdir)
             self.orbax_checkpointer = ocp.PyTreeCheckpointer()
+            if 'adaptive' in loss_params.keys():
+                self.adaptive_loss = loss_params.pop('adaptive')
+            else:
+                self.adaptive_loss = False
 
     def init_net(self, name, params, init_input):
         """
@@ -107,7 +111,14 @@ class trainer:
         #if opt_class == optax.sgd and 'weight_decay' in self.optimizer_hparams: 
         #    transf.append(optax.add_decayed_weights(self.optimizer_hparams.pop('weight_decay')))
 
-        return opt_class(self.optimizer_hparams.pop('lr'), **self.optimizer_hparams)
+        if 'ema_decay' in self.optimizer_hparams.keys():
+            print('using ema')
+            ema_decay = self.optimizer_hparams.pop('ema_decay')
+            return optax.chain(opt_class(self.optimizer_hparams.pop('lr'), **self.optimizer_hparams),
+                               optax.ema(ema_decay))
+
+        else:
+            return opt_class(self.optimizer_hparams.pop('lr'), **self.optimizer_hparams)
 
     def save_model(self, step):
         """
@@ -136,10 +147,13 @@ class trainer:
         except:
             raise ValueError('Failed to load model')
 
-    def create_functions(self):
-     
+    def create_functions(self, total_d=None):
+        # create train step function and test step function
+
         def init_loss(name, apply_fn, params, loss_params, batch, train):
             module_name, class_name = name.rsplit('.', 1)
+            if self.adaptive_loss:
+                loss_params['total_d'] = total_d
             loss = utils.get_class_by_name(module_name, class_name)(**loss_params)
             return loss(apply_fn, params, batch, train)
         
@@ -208,9 +222,12 @@ class trainer:
             if not isinstance(batch, (tuple, list)):
                 batch = [batch,]
 
-            if self.rng_key is not None:
-                self.rng_key, subkey = jax.random.split(self.rng_key)
-                batch.append(subkey)
+            # key for dropout and diffusion
+            self.rng_key, subkey = jax.random.split(self.rng_key)
+            batch.append(subkey)
+
+            if self.adaptive_loss:
+                batch.append(self.state.step)
 
             if train:
                 self.state, metric = self.train_step(self.state, batch)
@@ -248,7 +265,7 @@ class trainer:
         self.state = train_state.TrainState.create(apply_fn = self.net.apply,
                                                 params = self.init_params if self.state is None else self.state['params'],
                                                 tx     = self.init_optimizer(epochs, num_steps_per_epoch))
-        self.create_functions()
+        self.create_functions(epochs * num_steps_per_epoch)
 
         for epoch in range(epochs):
 
