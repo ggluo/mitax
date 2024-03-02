@@ -1,5 +1,24 @@
 ## TODO
 
-- [ ] class registry pattern
-- [ ] loss functions
-- [ ] dataloader
+- [x] print parameters
+- [x] loss functions
+- [ ] parallel training on multi device
+- [ ] fully recover and save the state
+- [ ] learning schedule and optimizer
+- [ ] test interruptible training
+- [x] simplify dataloader and dataflow
+- [ ] add commit stamp for installation and training models 
+- [ ] smld
+- [x] weight initialization
+- [x] weight normalization
+- [ ] add test modules and applications
+- [x] save config
+- [x] PRNG vs key https://stackoverflow.com/questions/75338838/jax-best-way-to-iterate-rngkeys
+- [ ] notebook for sigma schedule
+- [x] start to add logging information
+- [x] embed rng key
+- [x] add list sum, list average
+- [x] vmap
+- [x] dropout
+- [ ] checkpoint manager
+- [ ] quantitatively evaluate the generated samples

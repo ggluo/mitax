@@ -201,8 +201,17 @@ class MultiThreadMapData(_ParallelMapData):
             # if p.is_alive():
             #     logger.warn("Cannot join thread {}.".format(p.name))
 
-class cfl_pipe(RNGDataFlow):
+class fileflow(RNGDataFlow):
+    """
+    A data flow class for iterating over a list of files.
 
+    Args:
+        files (list): List of file names.
+        shuffle (bool): Whether to shuffle the file names.
+
+    Returns:
+        Iterator: An iterator that yields file names.
+    """
     def __init__(self, files, shuffle):
         self._size   = len(files)
         self.files   = files
@@ -219,11 +228,6 @@ class cfl_pipe(RNGDataFlow):
         for idx in idxs:
             fname = self.files[idx]
             yield fname
-
-def dataloader(filelist, num_thread, map_func, batchsize, buffer_factor=5, shuffle=True):
-    d1 = cfl_pipe(filelist, shuffle)
-    d1 = MultiThreadMapData(d1, num_thread, map_func, buffer_size=batchsize*buffer_factor, strict=True)
-    return BatchData(d1, batchsize, use_list=False)
 
 if __name__ == '__main__':
     import time

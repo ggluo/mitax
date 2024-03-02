@@ -4,9 +4,9 @@ import yaml
 import numpy as np
 import tempfile
 import subprocess
-import datetime
-
-from mitax.model.registry import registered_classes
+from datetime import datetime
+import jax
+import jax.numpy as jnp
 
 def get_class_by_name(module, class_name):
     """
@@ -33,24 +33,6 @@ def get_class_by_name(module, class_name):
     except (ImportError, AttributeError):
         raise ValueError(f"Class {class_name} not found in module {module} or module {module} does not exist.")
 
-def get_registered_class(name):
-    """
-    Retrieves a class from the registered_classes dictionary.
-
-    Args:
-        name (str): The name of the class to retrieve.
-
-    Returns:
-        class: The class object.
-
-    Raises:
-        ValueError: If the class is not found in the registered_classes dictionary.
-    """
-    try:
-        return registered_classes[name]
-    
-    except KeyError:
-        raise ValueError(f"Class {name} not found in registered_classes.")
 
 def load_config(path):
     """
@@ -108,7 +90,7 @@ def readcfl(name):
     d = open(name + ".cfl", "r")
     a = np.fromfile(d, dtype=np.complex64, count=n)
     d.close()
-    return a.reshape(dims)
+    return a.reshape(dims, order='F')
 
 def writecfl(name, array):
     """
@@ -121,6 +103,8 @@ def writecfl(name, array):
     Returns:
     None
     """
+    if not isinstance(array, np.ndarray):
+        array = np.array(array)
 
     h = open(name + ".hdr", "w")
     h.write('# Dimensions\n')
@@ -205,8 +189,96 @@ def bart(nargout, cmd, *args, return_str=False):
 
     return output
 
-_RNG_SEED = None
+def dataloader(data, num_thread, map_func, batch_size, strict=True, factor=10):
+    """
+    A function that creates a data loader for processing data in parallel.
 
+    Args:
+        data: the data to be processed, which can be a list, tuple, or DataFlow object.
+        num_thread: The number of threads to use for parallel processing.
+        map_func: The function to apply to each data item.
+        batch_size: the returned batch size.
+        strict: 
+
+    Returns:
+        A data loader that fetch the input data in parallel.
+
+    """
+    from mitax.dataflow.common import BatchData
+    from mitax.dataflow.parallel_map import MultiThreadMapData
+
+    d1 = MultiThreadMapData(data, num_thread, map_func, buffer_size=batch_size*factor, strict=strict)
+    return BatchData(d1, batch_size, use_list=False)
+
+
+def fileflow(files, shuffle=False):
+    """
+    A data flow class for iterating over a list of files.
+
+    Args:
+        files (list): List of file names.
+        shuffle (bool): Whether to shuffle the file names.
+
+    Returns:
+        Iterator: An iterator that yields file names.
+    """
+    
+    from mitax.dataflow.parallel_map import fileflow as fileflow_
+
+    return fileflow_(files, shuffle)
+
+
+def create_folder(save_path, time=True):
+    """
+    Create a folder for logs.
+
+    Parameters:
+    save_path (str): The path where the folder will be created.
+    time (bool, optional): Whether to include the current timestamp in the folder name. 
+                           Defaults to True.
+
+    Returns:
+    str: The path of the created folder.
+    """
+    if time:
+        log_path = os.path.join(save_path, datetime.now().strftime("%Y%m%d-%H%M%S"))
+    else:
+        log_path = save_path
+
+    if not os.path.exists(log_path):
+        os.makedirs(log_path)
+    return log_path
+
+def list_files(path, ext=None, sort=True):
+    """
+    List all files in a directory.
+
+    Args:
+        path (str): The path to the directory.
+        ext (str, optional): The extension of the files to be listed. Defaults to None.
+        sort (bool, optional): Whether to sort the files. Defaults to True.
+
+    Returns:
+        list: A list of file names.
+    """
+    if ext is None:
+        files = [os.path.join(path, f) for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))]
+    else:
+        files = [os.path.join(path, f) for f in os.listdir(path) if os.path.isfile(os.path.join(path, f)) and f.endswith(ext)]
+    if sort:
+        files.sort()
+    return files
+
+def read_filelist(filename):
+    """
+    Read a file containing a list of file names.
+    """
+    with open(filename) as f:
+        lines = [line.rstrip() for line in f]
+        return lines
+
+
+_RNG_SEED = None
 
 def fix_rng_seed(seed):
     """
@@ -246,3 +318,25 @@ def get_rng(obj=None):
     if _RNG_SEED is not None:
         seed = _RNG_SEED
     return np.random.RandomState(seed)
+
+def float2cplx(float_in):
+    if isinstance(float_in, np.ndarray):
+        return np.array(float_in[...,0]+1.0j*float_in[...,1], dtype='complex64')
+    elif isinstance(float_in, jnp.ndarray):
+        return jnp.array(float_in[...,0]+1.0j*float_in[...,1], dtype='complex64')
+    else:
+        raise ValueError('Input must be numpy or jax array')
+
+def cplx2float(cplx_in):
+    if isinstance(cplx_in, np.ndarray):
+        return np.array(np.stack((cplx_in.real, cplx_in.imag), axis=-1), dtype='float32')
+    elif isinstance(cplx_in, jnp.ndarray):
+        return jnp.array(jnp.stack((cplx_in.real, cplx_in.imag), axis=-1), dtype='float32')
+    else:
+        raise ValueError('Input must be numpy or jax array')
+
+def batch_add(a, b):
+  return jax.vmap(lambda a, b: a + b)(a, b)
+
+def batch_mul(a, b):
+  return jax.vmap(lambda a, b: a * b)(a, b)

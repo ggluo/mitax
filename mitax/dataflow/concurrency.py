@@ -16,7 +16,7 @@ import six
 from six.moves import queue
 import subprocess
 
-from spreco.common import logger
+from mitax.misc import logger
 
 
 __all__ = ['StoppableThread', 'LoopThread', 'ShareSessionThread',

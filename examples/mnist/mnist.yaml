@@ -1,0 +1,10 @@
+net_name: mitax.model.toys.mnist_cnn
+loss_name: mitax.model.classifier.cross_entropy
+batch_size: 32
+input_shape: [28,28]
+optimizer: adam
+optimizer_hparams: {lr: 0.0001, ema_decay: 0.99}
+
+logdir: /home/gluo/mitax/examples/log
+
+num_thread: 10

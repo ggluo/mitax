@@ -6,7 +6,7 @@ import threading
 from abc import ABCMeta, abstractmethod
 import six
 
-from spreco.common.utils import get_rng
+from mitax.misc.utils import get_rng
 
 __all__ = ['DataFlow', 'ProxyDataFlow', 'RNGDataFlow', 'DataFlowTerminated']
 
