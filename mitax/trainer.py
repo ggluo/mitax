@@ -66,7 +66,7 @@ class trainer:
             self.rng_key           = rng_key
 
             self.init_net(self.net_name, self.net_hparams, init_input)
-            self.logdir = utils.create_folder(logdir)
+            self.logdir = utils.create_folder(logdir, prefix=loss_name.split('.')[-1])
             self.writer = SummaryWriter(self.logdir)
             self.orbax_checkpointer = ocp.PyTreeCheckpointer()
             if 'adaptive' in loss_params.keys():
@@ -209,7 +209,7 @@ class trainer:
         Returns:
             None
         """
-        if metric is None:
+        if metric is not None:
             print('Epoch {:d}: {} in {:0.2f} sec -> '.format(epoch, prefix, time), end='')
             for k, v in metric.items():
                 print(k + ': {:0.4f}'.format(v), end=' ')
