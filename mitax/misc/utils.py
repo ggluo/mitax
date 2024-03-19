@@ -7,6 +7,12 @@ import subprocess
 from datetime import datetime
 import jax
 import jax.numpy as jnp
+from skimage.metrics import structural_similarity, peak_signal_noise_ratio
+import mmap
+
+##################################################
+#      Utility Functions for training loop       #
+##################################################
 
 def get_class_by_name(module, class_name):
     """
@@ -62,132 +68,6 @@ def save_config(x, path):
     """
     with open(os.path.join(path, 'config.yaml'), 'w') as yaml_file:
         yaml.dump(x, yaml_file, default_flow_style=False, sort_keys=False)
-
-def readcfl(name):
-    """
-    Read a cfl file and return the data as a NumPy array.
-
-    Parameters:
-    name (str): The name of the cfl file (without the extension).
-
-    Returns:
-    numpy.ndarray: The data stored in the cfl file, reshaped according to the dimensions specified in the corresponding .hdr file.
-
-    """
-    # get dims from .hdr
-    h = open(name + ".hdr", "r")
-    h.readline() # skip
-    l = h.readline()
-    h.close()
-    dims = [int(i) for i in l.split( )]
-
-    # remove singleton dimensions from the end
-    n = np.prod(dims)
-    dims_prod = np.cumprod(dims)
-    dims = dims[:np.searchsorted(dims_prod, n)+1]
-
-    # load data and reshape into dims
-    d = open(name + ".cfl", "r")
-    a = np.fromfile(d, dtype=np.complex64, count=n)
-    d.close()
-    return a.reshape(dims, order='F')
-
-def writecfl(name, array):
-    """
-    Write a NumPy array to a file in the .cfl format.
-
-    Parameters:
-    name (str): The base name of the output file.
-    array (ndarray): The NumPy array to be written.
-
-    Returns:
-    None
-    """
-    if not isinstance(array, np.ndarray):
-        array = np.array(array)
-
-    h = open(name + ".hdr", "w")
-    h.write('# Dimensions\n')
-    for i in (array.shape):
-        h.write("%d " % i)
-    h.write('\n')
-    h.close()
-    d = open(name + ".cfl", "w")
-    array.T.astype(np.complex64).tofile(d) # tranpose for column-major order
-    d.close()
-
-
-def bart(nargout, cmd, *args, return_str=False):
-    """
-    Call bart from the system command line.
-
-    Args:
-        nargout (int): The number of output arguments expected from the command.
-        cmd (str): The command to be executed by bart.
-        *args: Variable number of input arguments for the command.
-        return_str (bool, optional): Whether to return the output as a string. Defaults to False.
-
-    Returns:
-        list or str: The output of the command. If nargout is 1, returns a single element list.
-                     If return_str is True, returns the output as a string.
-
-    Raises:
-        Exception: If the command exits with an error.
-
-    Usage:
-        bart(<nargout>, <command>, <arguments...>)
-    """
-    if type(nargout) != int or nargout < 0:
-        print("Usage: bart(<nargout>, <command>, <arguments...>)")
-        return None
-
-    name = tempfile.NamedTemporaryFile().name
-
-    nargin = len(args)
-    infiles = [name + 'in' + str(idx) for idx in range(nargin)]
-    in_str = ' '.join(infiles)
-
-    for idx in range(nargin):
-        writecfl(infiles[idx], args[idx])
-
-    outfiles = [name + 'out' + str(idx) for idx in range(nargout)]
-    out_str = ' '.join(outfiles)
-
-    shell_str = 'bart ' + cmd + ' ' + in_str + ' ' + out_str
-    print(shell_str)
-    if not return_str:
-        ERR = os.system(shell_str)
-    else:
-        try:
-            strs = subprocess.check_output(shell_str, shell=True).decode()
-            return strs
-        except:
-            ERR = True
-
-    for elm in infiles:
-        if os.path.isfile(elm + '.cfl'):
-            os.remove(elm + '.cfl')
-        if os.path.isfile(elm + '.hdr'):
-            os.remove(elm + '.hdr')
-
-    output = []
-    for idx in range(nargout):
-        elm = outfiles[idx]
-        if not ERR:
-            output.append(readcfl(elm))
-        if os.path.isfile(elm + '.cfl'):
-            os.remove(elm + '.cfl')
-        if os.path.isfile(elm + '.hdr'):
-            os.remove(elm + '.hdr')
-
-    if ERR:
-        print("Make sure you install bart properly")
-        raise Exception("Command exited with an error.")
-
-    if nargout == 1:
-        output = output[0]
-
-    return output
 
 def dataloader(data, num_thread, map_func, batch_size, strict=True, factor=10):
     """
@@ -277,7 +157,6 @@ def read_filelist(filename):
         lines = [line.rstrip() for line in f]
         return lines
 
-
 _RNG_SEED = None
 
 def fix_rng_seed(seed):
@@ -319,6 +198,169 @@ def get_rng(obj=None):
         seed = _RNG_SEED
     return np.random.RandomState(seed)
 
+##################################################
+#   Utility Functions for MRI files and recon    #
+##################################################
+
+def readcfl(name):
+    """
+    Read a cfl file and return the data as a NumPy array.
+
+    Parameters:
+    name (str): The name of the cfl file (without the extension).
+
+    Returns:
+    numpy.ndarray: The data stored in the cfl file, reshaped according to the dimensions specified in the corresponding .hdr file.
+
+    """
+    # get dims from .hdr
+    h = open(name + ".hdr", "r")
+    h.readline() # skip
+    l = h.readline()
+    h.close()
+    dims = [int(i) for i in l.split( )]
+
+    # remove singleton dimensions from the end
+    n = np.prod(dims)
+    dims_prod = np.cumprod(dims)
+    dims = dims[:np.searchsorted(dims_prod, n)+1]
+
+    # load data and reshape into dims
+    d = open(name + ".cfl", "r")
+    a = np.fromfile(d, dtype=np.complex64, count=n)
+    d.close()
+    return a.reshape(dims, order='F')
+
+def writecfl(name, array):
+    """
+    Write a NumPy array to a file in the .cfl format.
+
+    Parameters:
+    name (str): The base name of the output file.
+    array (ndarray): The NumPy array to be written.
+
+    Returns:
+    None
+    """
+    if not isinstance(array, np.ndarray):
+        array = np.array(array)
+
+    h = open(name + ".hdr", "w")
+    h.write('# Dimensions\n')
+    for i in (array.shape):
+        h.write("%d " % i)
+    h.write('\n')
+    h.close()
+    d = open(name + ".cfl", "w")
+    array.T.astype(np.complex64).tofile(d) # tranpose for column-major order
+    d.close()
+
+def writemulticfl(name, arrays):
+    size = 0
+    dims = []
+
+    for array in arrays:
+        size += array.size
+        dims.append(array.shape)
+
+    with open(name + ".hdr", "wt") as h:
+        h.write('# Dimensions\n')
+        h.write("%d\n" % size)
+
+        h.write('# SizesDimensions\n')
+        for dim in dims:
+            h.write("%d " % len(dim))
+        h.write('\n')
+
+        h.write('# MultiDimensions\n')
+        for dim in dims:
+            for i in dim:
+                h.write("%d " % i)
+            h.write('\n')
+            
+    size = size * np.dtype(np.complex64).itemsize
+
+    with open(name + ".cfl", "a+b") as d:
+        os.ftruncate(d.fileno(), size)
+        mm = mmap.mmap(d.fileno(), size, flags=mmap.MAP_SHARED, prot=mmap.PROT_WRITE)
+        for array in arrays:
+            if array.dtype != np.complex64:
+                array = array.astype(np.complex64)
+            mm.write(np.ascontiguousarray(array.T))
+        mm.close()
+
+def bart(nargout, cmd, *args, return_str=False):
+    """
+    Call bart from the system command line.
+
+    Args:
+        nargout (int): The number of output arguments expected from the command.
+        cmd (str): The command to be executed by bart.
+        *args: Variable number of input arguments for the command.
+        return_str (bool, optional): Whether to return the output as a string. Defaults to False.
+
+    Returns:
+        list or str: The output of the command. If nargout is 1, returns a single element list.
+                     If return_str is True, returns the output as a string.
+
+    Raises:
+        Exception: If the command exits with an error.
+
+    Usage:
+        bart(<nargout>, <command>, <arguments...>)
+    """
+    if type(nargout) != int or nargout < 0:
+        print("Usage: bart(<nargout>, <command>, <arguments...>)")
+        return None
+
+    name = tempfile.NamedTemporaryFile().name
+
+    nargin = len(args)
+    infiles = [name + 'in' + str(idx) for idx in range(nargin)]
+    in_str = ' '.join(infiles)
+
+    for idx in range(nargin):
+        writecfl(infiles[idx], args[idx])
+
+    outfiles = [name + 'out' + str(idx) for idx in range(nargout)]
+    out_str = ' '.join(outfiles)
+
+    shell_str = 'bart ' + cmd + ' ' + in_str + ' ' + out_str
+    print(shell_str)
+    if not return_str:
+        ERR = os.system(shell_str)
+    else:
+        try:
+            strs = subprocess.check_output(shell_str, shell=True).decode()
+            return strs
+        except:
+            ERR = True
+
+    for elm in infiles:
+        if os.path.isfile(elm + '.cfl'):
+            os.remove(elm + '.cfl')
+        if os.path.isfile(elm + '.hdr'):
+            os.remove(elm + '.hdr')
+
+    output = []
+    for idx in range(nargout):
+        elm = outfiles[idx]
+        if not ERR:
+            output.append(readcfl(elm))
+        if os.path.isfile(elm + '.cfl'):
+            os.remove(elm + '.cfl')
+        if os.path.isfile(elm + '.hdr'):
+            os.remove(elm + '.hdr')
+
+    if ERR:
+        print("Make sure you install bart properly")
+        raise Exception("Command exited with an error.")
+
+    if nargout == 1:
+        output = output[0]
+
+    return output
+
 def float2cplx(float_in):
     if isinstance(float_in, np.ndarray):
         return np.array(float_in[...,0]+1.0j*float_in[...,1], dtype='complex64')
@@ -334,6 +376,48 @@ def cplx2float(cplx_in):
         return jnp.array(jnp.stack((cplx_in.real, cplx_in.imag), axis=-1), dtype='float32')
     else:
         raise ValueError('Input must be numpy or jax array')
+
+def norm_to_uint(inp, bit=8):
+    maximum = np.max(inp)
+    out = inp/maximum*np.power(2., bit)
+    
+    tp = np.uint8
+    if bit == 16:
+        tp= np.uint16
+    if bit == 32:
+        tp= np.uint16
+    return out.astype(tp)
+
+def psnr(img1, img2, bit=16, tobit=False):
+    """
+    calculate peak SNR, img1-true, img2-test
+    """
+    pixel_max = np.max(img2)
+    
+    if tobit:
+        img1 = norm_to_uint(img1, bit)
+        img2 = norm_to_uint(img2, bit)
+        pixel_max = np.power(2., bit) - 1
+    return peak_signal_noise_ratio(img1, img2, data_range=pixel_max)
+
+def ssim(img1, img2, bit=16, tobit=False):
+    """
+    calcualte similarity index between img1 and img2
+    """
+    
+    scale = np.max(img2)
+    if tobit:
+        img1 = norm_to_uint(img1, bit)
+        img2 = norm_to_uint(img2, bit)  
+        scale = np.power(2., bit) - 1 
+    img1.astype(np.float64)
+    img2.astype(np.float64)
+    scale.astype(np.float64)
+    return structural_similarity(img1, img2, data_range=scale)
+
+##################################################
+#   Utility Functions for JAX and numpy          #
+##################################################
 
 def batch_add(a, b):
   return jax.vmap(lambda a, b: a + b)(a, b)
