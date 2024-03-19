@@ -169,14 +169,15 @@ class trainer:
             return loss(apply_fn, params, batch, train)
         
         def train_step(state, batch):
-            loss_fn = lambda params: init_loss(self.loss_name, self.state.apply_fn, params, self.loss_params, batch, train=True)
-            ret, grads = jax.value_and_grad(loss_fn, has_aux=True)(state.params) # ret[0] is loss, ret[1] is metric
+            loss_fn = lambda params, batch: init_loss(self.loss_name, self.state.apply_fn, params, self.loss_params, batch, train=True)
+            ret, grads = jax.value_and_grad(loss_fn, has_aux=True)(state.params, batch) # ret[0] is loss, ret[1] is metric
             ret[1]['loss'] = ret[0]
             state = state.apply_gradients(grads=grads)
             return state, ret[1]
 
         def test_step(state, batch):
-            loss, metric = init_loss(self.loss_name, self.state.apply_fn, state.params, self.loss_params, batch, train=False)
+            loss_fn = lambda params, batch: init_loss(self.loss_name, self.state.apply_fn, params, self.loss_params, batch, train=False)
+            loss, metric = loss_fn(state.params, batch)
             metric['loss'] = loss
             return metric
         
@@ -296,4 +297,4 @@ class trainer:
             self.display_summary(epoch+1, self.kernel(test_loader, False), time.time()-begin_t, prefix='test' )
 
             if (epoch+1) % snap_interval == 0:
-                self.save_model(epoch)
+                self.save_model(epoch+1)
