@@ -108,7 +108,7 @@ def fileflow(files, shuffle=False):
     return fileflow_(files, shuffle)
 
 
-def create_folder(save_path, time=True):
+def create_folder(save_path, time=True, prefix=None):
     """
     Create a folder for logs.
 
@@ -121,7 +121,10 @@ def create_folder(save_path, time=True):
     str: The path of the created folder.
     """
     if time:
-        log_path = os.path.join(save_path, datetime.now().strftime("%Y%m%d-%H%M%S"))
+        if prefix is not None:
+            log_path = os.path.join(save_path, "%s-%s"%(prefix, datetime.now().strftime("%Y%m%d-%H%M%S")))
+        else:
+            log_path = os.path.join(save_path, datetime.now().strftime("%Y%m%d-%H%M%S"))
     else:
         log_path = save_path
 
@@ -156,6 +159,15 @@ def read_filelist(filename):
     with open(filename) as f:
         lines = [line.rstrip() for line in f]
         return lines
+
+def check_out(cmd, split=True):
+    """ utility to check_out terminal command and return the output"""
+
+    strs = subprocess.check_output(cmd, shell=True).decode()
+
+    if split:
+        split_strs = strs.split('\n')[:-1]
+    return split_strs
 
 _RNG_SEED = None
 
