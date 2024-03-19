@@ -256,3 +256,65 @@ class ResnetBlockBigGANpp(nn.Module):
       return x + h
     else:
       return (x + h) / np.sqrt(2.)
+class self_causal_attn(nn.Module):
+    
+    nr_filters: int
+    mask: Optional[jnp.ndarray] = None
+
+    @nn.compact
+    def __call__(self, x):
+      """Self-causal attention mechanism.
+      
+      Args:
+      - x (jax.numpy.ndarray): Input tensor, shape (batch_size, seq_len, depth).
+      - nin_layers (list): List of NIN layers to obtain query, key, and value tensors.
+      - mask (jax.numpy.ndarray, optional): Mask tensor for masking out certain positions, 
+                                            shape (batch_size, seq_len, seq_len).
+      
+      Returns:
+      - jax.numpy.ndarray: Output tensor, shape (batch_size, seq_len, depth).
+      """
+      assert x.ndim == 3, "Input tensor must have shape (batch_size, seq_len, depth)."
+      
+      # Apply NIN layers to get query, key, and value tensors
+      q = NIN(self.nr_filters)(x)
+      k = NIN(self.nr_filters)(x)
+      v = NIN(self.nr_filters)(x)
+      
+      # Matmul of query and key
+      matmul_qk = jnp.matmul(q, k.transpose((0, 2, 1)))
+      
+      # Scale the dot product
+      dk = q.shape[-1]
+      scaled_attention_logits = matmul_qk / jnp.sqrt(dk)
+      scaled_attention_logits += ((1-self.mask) * -1e9)  # Add a large negative value to masked positions
+
+      attention_weights = jax.nn.softmax(scaled_attention_logits, axis=-1)      
+      return jnp.matmul(attention_weights, v)
+
+def generate_causal_mask(seq_len):
+    """Generate a causal mask tensor.
+    
+    Args:
+    - seq_len (int): Length of the sequence.
+    
+    Returns:
+    - jax.numpy.ndarray: Causal mask tensor, shape (seq_len, seq_len).
+    """
+    mask = jnp.tril(jnp.ones((seq_len, seq_len)))
+    return mask
+
+if __name__ == "__main__":
+
+  input_shape = (1, 10, 1) #(batch_size, seq_len, depth)
+  x = jax.random.normal(jax.random.PRNGKey(0),input_shape)
+  mask = generate_causal_mask(10)
+  cau_attn = self_causal_attn(nr_filters=1, mask=mask)
+  vars = cau_attn.init(jax.random.PRNGKey(0), x)
+
+  output = cau_attn.apply(vars, x)
+  print(jnp.squeeze(output))
+
+  x1 = x.at[0, 5, :].set(0)
+  output = cau_attn.apply(vars, x1)
+  print(jnp.squeeze(output))
