@@ -1,12 +1,24 @@
-from typing import Any
+from typing import Any, TypeVar, Mapping
 from flax.training import train_state, orbax_utils
 from flax.metrics.tensorboard import SummaryWriter
 import optax
 import orbax.checkpoint as ocp
 import jax
 import time
-
+from jax import tree_util
+import jax.numpy as jnp
 from mitax.misc import utils
+
+import torch
+
+TX = TypeVar("TX", bound=optax.OptState)
+
+
+def restore_optimizer_state(opt_state: TX, restored: Mapping[str, Any]) -> TX:
+    """Restore optimizer state from loaded checkpoint (or .msgpack file)."""
+    return tree_util.tree_unflatten(
+        tree_util.tree_structure(opt_state), tree_util.tree_leaves(restored)
+    )
 
 class trainer:
     """
@@ -30,7 +42,7 @@ class trainer:
                  optimizer_hparams: dict,
                  init_input: Any,
                  logdir: str,
-                 rng_key: Any = jax.random.PRNGKey(1234)):
+                 rng_key: Any):
             """
             Initializes the Trainer class.
 
@@ -78,7 +90,7 @@ class trainer:
 
         self.net = utils.get_class_by_name(module_name, class_name)(**params)
         self.rng_key, init_rng = jax.random.split(self.rng_key)
-        variables              = self.net.init(init_rng, **init_input, train=False)
+        variables              = self.net.init(init_rng, **init_input, train=False)# jitize the net.init
         self.init_params       = variables['params']
         self.state             = None
 
@@ -112,7 +124,6 @@ class trainer:
         #    transf.append(optax.add_decayed_weights(self.optimizer_hparams.pop('weight_decay')))
 
         if 'ema_decay' in self.optimizer_hparams.keys():
-            print('using ema')
             ema_decay = self.optimizer_hparams.pop('ema_decay')
             return optax.chain(opt_class(self.optimizer_hparams.pop('lr'), **self.optimizer_hparams),
                                optax.ema(ema_decay))
@@ -198,10 +209,11 @@ class trainer:
         Returns:
             None
         """
-        print('Epoch {:d}: {} in {:0.2f} sec -> '.format(epoch, prefix, time), end='')
-        for k, v in metric.items():
-            print(k + ': {:0.4f}'.format(v), end=' ')
-        print()
+        if metric is None:
+            print('Epoch {:d}: {} in {:0.2f} sec -> '.format(epoch, prefix, time), end='')
+            for k, v in metric.items():
+                print(k + ': {:0.4f}'.format(v), end=' ')
+            print()
 
     def kernel(self, dataloader, train=True, log_interval=2):
         """
@@ -216,11 +228,16 @@ class trainer:
         
         
         lm = []
-
+        avg_metric = None
         for inner_step, batch in enumerate(dataloader):
 
             if not isinstance(batch, (tuple, list)):
                 batch = [batch,]
+
+            # in case of torch tensors, convert to jax arrays
+            for ix, b in enumerate(batch):
+                if isinstance(b, torch.Tensor):
+                    batch[ix] = jnp.array(b.numpy())
 
             # key for dropout and diffusion
             self.rng_key, subkey = jax.random.split(self.rng_key)
@@ -237,13 +254,14 @@ class trainer:
                 metric = self.test_step(self.state, batch)
             lm.append(metric)
 
-        avg_metric = {k: sum(d[k] for d in lm) / len(lm) for k in lm[0]}
+        if len(lm) > 0:
+            avg_metric = {k: sum(d[k] for d in lm) / len(lm) for k in lm[0]}
 
         if not train:
             self.write_summary(self.state.step, avg_metric, prefix='test')
         return avg_metric
 
-    def train(self, train_loader, test_loader, epochs, num_steps_per_epoch, snap_interval, pretrained_model=None):
+    def train(self, train_loader, test_loader, epochs, num_steps_per_epoch, snap_interval, restore_model=None):
         """
         Trains the model using the specified train and test loaders, number of epochs, number of steps per epoch, and snapshot interval.
 
@@ -256,15 +274,17 @@ class trainer:
 
         Returns:
             None
-        """
-
-        if pretrained_model is not None:
-            state_dict = self.load_model(pretrained_model)
-            self.state = state_dict['model']
+        """        
 
         self.state = train_state.TrainState.create(apply_fn = self.net.apply,
-                                                params = self.init_params if self.state is None else self.state['params'],
+                                                params = self.init_params,
                                                 tx     = self.init_optimizer(epochs, num_steps_per_epoch))
+
+        if restore_model is not None:
+            state_dict = self.load_model(restore_model)['model']
+            restored_optimizer = restore_optimizer_state(self.state.opt_state, state_dict["opt_state"])
+            self.state = self.state.replace(step=state_dict['step'], params=state_dict['params'], opt_state=restored_optimizer)
+
         self.create_functions(epochs * num_steps_per_epoch)
 
         for epoch in range(epochs):
