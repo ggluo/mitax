@@ -21,7 +21,6 @@ sampler = AncestralSampler(net_name      = config['net_name'],
                            net_hparams   = config['net_hparams'],
                            dm_name       = config['loss_name'],
                            dm_hparams    = config['loss_params'],
-                           target_snr    = 0.2,
                            init_input    = {'x': jnp.ones((1, 256, 256, 2), dtype=jnp.float32), 't': jnp.ones((1), dtype=jnp.float32)},
                            path          = logdir+'/mitax.model.unet.ncsnpp_919')
 
@@ -32,10 +31,10 @@ sampler.dm.sigma_min = 0.005
 sampler.dm.continuous = True
 sampler.dm.N = 50
 sampler.create_functions()
-_, image1 = sampler(jax.random.normal(jax.random.PRNGKey(4), input_shape)*sampler.dm.sigma_max, inner_steps=1)
+image1 = sampler(jax.random.normal(jax.random.PRNGKey(4), input_shape)*sampler.dm.sigma_max, inner_steps=1)
 
 sampler.dm.continuous = False
 sampler.create_functions()
-_, image2 = sampler(jax.random.normal(jax.random.PRNGKey(4), input_shape)*sampler.dm.sigma_max, inner_steps=1)
+image2 = sampler(jax.random.normal(jax.random.PRNGKey(4), input_shape)*sampler.dm.sigma_max, inner_steps=1)
 
 savecfl(evalpath('./', 'an'), np.concatenate((image1[-1], image2[-1]), axis=0))
