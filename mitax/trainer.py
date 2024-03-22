@@ -8,7 +8,7 @@ import time
 from jax import tree_util
 import jax.numpy as jnp
 from mitax.misc import utils
-
+import os
 import torch
 
 TX = TypeVar("TX", bound=optax.OptState)
@@ -66,7 +66,10 @@ class trainer:
             self.rng_key           = rng_key
 
             self.init_net(self.net_name, self.net_hparams, init_input)
-            self.logdir = utils.create_folder(logdir, prefix=loss_name.split('.')[-1])
+            if os.path.exists(logdir):
+                self.logdir = logdir
+            else:
+                self.logdir = utils.create_folder(logdir, prefix=loss_name.split('.')[-1])
             self.writer = SummaryWriter(self.logdir)
             self.orbax_checkpointer = ocp.PyTreeCheckpointer()
             if 'adaptive' in loss_params.keys():
@@ -262,7 +265,7 @@ class trainer:
             self.write_summary(self.state.step, avg_metric, prefix='test')
         return avg_metric
 
-    def train(self, train_loader, test_loader, epochs, num_steps_per_epoch, snap_interval, restore_model=None):
+    def train(self, train_loader, test_loader, epochs, num_steps_per_epoch, snap_interval):
         """
         Trains the model using the specified train and test loaders, number of epochs, number of steps per epoch, and snapshot interval.
 
@@ -272,7 +275,7 @@ class trainer:
             epochs (int): Number of epochs for training.
             num_steps_per_epoch (int): Number of steps per epoch.
             snap_interval (int): Interval for saving snapshots of the model.
-
+            restore_model (str, optional): The path to a logging folder for restoring the model.
         Returns:
             None
         """        
@@ -281,20 +284,23 @@ class trainer:
                                                 params = self.init_params,
                                                 tx     = self.init_optimizer(epochs, num_steps_per_epoch))
 
-        if restore_model is not None:
-            state_dict = self.load_model(restore_model)['model']
+        base_e = 0
+        r_path = utils.get_last_folder(self.logdir, self.net_name)
+        if r_path is not None:
+            base_e = int(r_path.split('_')[-1])
+            state_dict = self.load_model(os.path.join(self.logdir, r_path))['model']
             restored_optimizer = restore_optimizer_state(self.state.opt_state, state_dict["opt_state"])
             self.state = self.state.replace(step=state_dict['step'], params=state_dict['params'], opt_state=restored_optimizer)
 
-        self.create_functions(epochs * num_steps_per_epoch)
+        self.create_functions(epochs * num_steps_per_epoch) # epochs * num for adaptive loss
 
         for epoch in range(epochs):
 
             begin_t    = time.time()
-            self.display_summary(epoch+1, self.kernel(train_loader, True), time.time()-begin_t, prefix='train')
+            self.display_summary(base_e+epoch+1, self.kernel(train_loader, True), time.time()-begin_t, prefix='train')
 
             begin_t    = time.time()
-            self.display_summary(epoch+1, self.kernel(test_loader, False), time.time()-begin_t, prefix='test' )
+            self.display_summary(base_e+epoch+1, self.kernel(test_loader, False), time.time()-begin_t, prefix='test' )
 
             if (epoch+1) % snap_interval == 0:
-                self.save_model(epoch+1)
+                self.save_model(base_e+epoch+1)
