@@ -427,9 +427,9 @@ class TemporalSampler(base):
         self.update_step = jax.jit(update_step)
 
 
-    def __call__(self, x_init, x0, length=2, inner_steps=1, ast_sampler=None, save_evol=False):
+    def __call__(self, x_init, x0, atr=False, inner_steps=1, ast_sampler=None, save_evol=False):
         """
-        Perform the sampling process.
+        Perform the temporal sampling process.
 
         
 
@@ -437,10 +437,13 @@ class TemporalSampler(base):
         
         if save_evol:
             xs      = []
+        itrs = jnp.shape(x0)[1] if atr else 1
 
         nr_sequences = jnp.shape(x_init)[0]
         x = [x_init, x0]
-        for _ in range(length):
+        for i in range(itrs):
+            if i > 0:
+                x[1] = x[1].at[:, i, ...].set(x[0][:, i-1, ...])
             for t_i in tqdm.tqdm(jnp.linspace(self.dm.T, self.dm.eps, self.dm.N)):
                 for _ in range(inner_steps):
                     self.rng_key, subkey = jax.random.split(self.rng_key)
