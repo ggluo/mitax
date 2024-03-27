@@ -1,16 +1,12 @@
-# this unet is modified from the original ncsnpp.py in Song et al. (2021)
-
-import sys
-sys.path.append('/home/gluo/mitax')
-
 import functools
 import flax.linen as nn
 import jax.numpy as jnp
 
 from mitax.misc import utils
 from mitax.model.module2 import *
+import einops
 
-
+# causal unet
 class ncsnpp(nn.Module):
 
   dropout:          float = 0.1
@@ -34,9 +30,14 @@ class ncsnpp(nn.Module):
   fourier_scale: int = 16
   center_x:      bool = False
 
+  seq_len: int = 5
+
   @nn.compact
-  def __call__(self, x, t, train=True):
+  def __call__(self, x0, x1, t, train=True):
     
+    # x0 contains the previous frames 
+    # x1 contains the current frame
+    # scaling the input
 
     nonlinearity = utils.get_class_by_name(nn, self.nonlinearity)
     num_resolutions = len(self.ch_mult)
@@ -50,6 +51,7 @@ class ncsnpp(nn.Module):
 
     temb = nn.Dense(self.nr_filters * 4, kernel_init=default_init())(temb)
     temb = nn.Dense(self.nr_filters * 4, kernel_init=default_init())(nonlinearity(temb))
+   
 
     AttnBlock = functools.partial(AttnBlockpp, init_scale=self.init_scale, skip_rescale=self.skip_rescale)
 
@@ -84,17 +86,41 @@ class ncsnpp(nn.Module):
     else:
       raise ValueError("resblock type %s unrecognized."%self.resblock_type)
 
-    if self.center_x:
-        x = 2 * x - 1.
+
+    # check if preprocessing sequence of images
+    assert len(x0.shape) == 5
+    
+    b_x, t_x, h_x, w_x, c_x = x0.shape
+    x0 = einops.rearrange(x0, 'b t h w c -> (b t) h w c')
+    x0 = conv3x3(x0, self.nr_filters)
+
+    temb = einops.repeat(temb, 'b c -> (b t) c', t=t_x)
+    x1 = einops.rearrange(x1, 'b t h w c -> (b t) h w c')
 
     # Downsampling block
     input_pyramid = None
     if self.progressive_input != 'none':
-      input_pyramid = x
-
-    hs = [conv3x3(x, self.nr_filters)]
+      input_pyramid = x1
+    causal_mask = generate_causal_mask(self.seq_len)
+    bst_x, sh_x, sw_x, sc_x = x0.shape
+    st_x = bst_x//b_x
+    
+    hs = [conv3x3(x1, self.nr_filters)]
+    xs0 = []
     for i_level in range(num_resolutions):
       
+      t_nr = self.nr_filters*self.ch_mult[i_level-1] if i_level!=0 else self.nr_filters
+      x0 = einops.rearrange(x0, '(b t) h w c -> (b h w) t c', b=b_x, h=sh_x, w=sw_x, t=st_x, c=sc_x)
+      x0 = nn.LayerNorm()(x0)
+      x0 = self_causal_attn(t_nr, causal_mask)(x0)
+      x0 = einops.rearrange(x0, '(b h w) t c -> (b t) h w c', b=b_x, h=sh_x, w=sw_x, t=st_x, c=t_nr)
+      x0 = ResnetBlock(out_ch=t_nr, down=False if i_level==0 else True)(x0, temb, train)
+
+      bst_x, sh_x, sw_x, sc_x = x0.shape
+      st_x = bst_x//b_x
+      xs0.append(x0)
+      hs[-1] = hs[-1] + x0
+
       for i_block in range(self.nr_res_blocks):
         h = ResnetBlock(out_ch=self.nr_filters * self.ch_mult[i_level])(hs[-1], temb, train)
         if h.shape[1] in self.attn_resolutions:
@@ -131,8 +157,11 @@ class ncsnpp(nn.Module):
     # Upsampling block
     for i_level in reversed(range(num_resolutions)):
       for i_block in range(self.nr_res_blocks + 1):
-        h = ResnetBlock(out_ch=self.nr_filters * self.ch_mult[i_level])(jnp.concatenate([h, hs.pop()], axis=-1), temb, train)
-
+        if i_block == self.nr_res_blocks:
+          h = ResnetBlock(out_ch=self.nr_filters * self.ch_mult[i_level])(jnp.concatenate([h, hs.pop(), xs0.pop()], axis=-1), temb, train)
+        else:
+          h = ResnetBlock(out_ch=self.nr_filters * self.ch_mult[i_level])(jnp.concatenate([h, hs.pop()], axis=-1), temb, train)
+      
       if h.shape[1] in self.attn_resolutions:
         h = AttnBlock()(h)
 
@@ -176,21 +205,39 @@ class ncsnpp(nn.Module):
           h = ResnetBlock(up=True)(h, temb, train)
 
     assert not hs
+    assert not xs0
 
     if self.progressive == 'output_skip':
       h = pyramid
     else:
       h = nonlinearity(nn.GroupNorm(num_groups=min(h.shape[-1] // 4, 32))(h))
-      h = conv3x3(h, x.shape[-1], init_scale=self.init_scale)
+      h = conv3x3(h, c_x, init_scale=self.init_scale)
 
-    if self.scale_out:
-      used_sigmas = used_sigmas.reshape((x.shape[0], *([1] * len(x.shape[1:]))))
+    if self.scale_out:# not working for sequence of images
+      used_sigmas = einops.repeat(used_sigmas, 'b -> (b t) 1 1 1', t=t_x)
       h = h / used_sigmas
-
+    
+    h = einops.rearrange(h, '(b t) h w c -> b t h w c', b=b_x, h=h_x, w=w_x, t=t_x, c=c_x)
     return h
 
 if __name__ == '__main__':
 
-  net = ncsnpp()
-  tabulate_fn = nn.tabulate(net, jax.random.PRNGKey(0))
-  print(tabulate_fn(x=jnp.ones((10, 256, 256, 2)), t=jnp.ones((10)), train=False))
+  seq_len = 10
+  net = ncsnpp(seq_len=seq_len, scale_out=False)
+  input_shape = (1, seq_len+1, 64, 64, 1)
+  x = jnp.zeros(input_shape)
+  x0 = x[:, :-1, ...]
+  x1 = x[:, 1:, ...]
+
+  t = jnp.ones((input_shape[0]), dtype=jnp.float32)
+  params = net.init(jax.random.PRNGKey(0), x0, x1, t, train=False)
+  out    = net.apply(params, x0, x1, t, train=True, rngs={'dropout': jax.random.PRNGKey(0)})
+  l2     = jnp.mean(out-x1, axis=(-3,-2,-1))
+  print(l2)
+
+  x0 = x0.at[:, 4, ...].set(1)
+  out    = net.apply(params, x0, x1, t, train=True, rngs={'dropout': jax.random.PRNGKey(0)})
+  l2     = jnp.mean(out-x1, axis=(-3,-2,-1))
+  print(l2)
+
+

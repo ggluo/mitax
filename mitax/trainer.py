@@ -285,7 +285,7 @@ class trainer:
                                                 tx     = self.init_optimizer(epochs, num_steps_per_epoch))
 
         base_e = 0
-        r_path = utils.get_last_folder(self.logdir, self.net_name)
+        r_path = utils.get_last_folder(self.logdir)
         if r_path is not None:
             base_e = int(r_path.split('_')[-1])
             state_dict = self.load_model(os.path.join(self.logdir, r_path))['model']
@@ -294,7 +294,7 @@ class trainer:
 
         self.create_functions(epochs * num_steps_per_epoch) # epochs * num for adaptive loss
 
-        for epoch in range(epochs):
+        for epoch in range(epochs-base_e):
 
             begin_t    = time.time()
             self.display_summary(base_e+epoch+1, self.kernel(train_loader, True), time.time()-begin_t, prefix='train')

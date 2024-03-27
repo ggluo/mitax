@@ -439,46 +439,62 @@ def batch_add(a, b):
 def batch_mul(a, b):
   return jax.vmap(lambda a, b: a * b)(a, b)
 
+def batch_div(a, b):
+    return jax.vmap(lambda a, b: a / b)(a, b)
 
 ##################################################
 #   Utility Functions for create sampler         #
 ##################################################
 
-def get_last_folder(directory, prefix):
-    """
-    Get the name of the last folder matching the specified prefix and number pattern
-    in the specified directory.
+#def get_last_folder(directory, prefix):
+#    """
+#    Get the name of the last folder matching the specified prefix and number pattern
+#    in the specified directory.
+#
+#    Args:
+#    - directory (str): The path to the directory containing folders.
+#    - prefix (str): The prefix string common to all folders.
+#
+#    Returns:
+#    - str: The name of the last folder matching the pattern.
+#           Returns None if no matching folders are found.
+#    """
+#    # Construct the regular expression pattern
+#    pattern = re.compile(fr'{re.escape(prefix)}_\d+')
+#
+#    # Get a list of folders matching the pattern
+#    folders = [folder for folder in os.listdir(directory) if pattern.fullmatch(folder)]
+#
+#    # If there are folders found
+#    if folders:
+#        # Extract numbers from folder names and get the maximum
+#        last_folder = max(map(lambda x: int(re.search(r'\d+', x).group()), folders))
+#        return f"{prefix}_{last_folder}"
+#    else:
+#        return None
 
-    Args:
-    - directory (str): The path to the directory containing folders.
-    - prefix (str): The prefix string common to all folders.
-
-    Returns:
-    - str: The name of the last folder matching the pattern.
-           Returns None if no matching folders are found.
-    """
-    # Construct the regular expression pattern
-    pattern = re.compile(fr'{re.escape(prefix)}_\d+')
-
-    # Get a list of folders matching the pattern
-    folders = [folder for folder in os.listdir(directory) if pattern.fullmatch(folder)]
-
-    # If there are folders found
-    if folders:
-        # Extract numbers from folder names and get the maximum
-        last_folder = max(map(lambda x: int(re.search(r'\d+', x).group()), folders))
-        return f"{prefix}_{last_folder}"
-    else:
-        return None
+def get_last_folder(directory):
+    # List all subdirectories
+    subdirectories = [d for d in os.listdir(directory) if os.path.isdir(os.path.join(directory, d))]
     
-def create_sampler(sampler_cls, init_input, logdir):
+    if subdirectories:
+        # Sort subdirectories based on numerical values
+        sorted_subdirectories = sorted(subdirectories, key=lambda x: int(x.split('_')[-1]))
+        
+        # Return the last subdirectory
+        return sorted_subdirectories[-1]
+    else:
+        return None  # No subdirectories found
+    
+def create_sampler(sampler_cls, init_input, logdir, model=None):
     config = load_config(logdir+'/config.yaml')
-    path = get_last_folder(logdir, config['net_name'])
-    print(f'create sampler with the model from {path}')
+    if model is None:
+        model = get_last_folder(logdir)
+    print(f'create sampler with the model from {model}')
 
     return get_class_by_name(sampler, sampler_cls)(net_name  = config['net_name'],
                         net_hparams   = config['net_hparams'],
                         dm_name       = config['loss_name'],
                         dm_hparams    = config['loss_params'],
                         init_input    = init_input,
-                        path          = os.path.join(logdir, path))
+                        path          = os.path.join(logdir, model))

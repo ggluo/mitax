@@ -6,7 +6,7 @@ import jax.numpy as jnp
 import jax
 from functools import partial
 from flax import linen as nn
-from mitax.misc.utils import batch_mul
+from mitax.misc.utils import batch_mul, batch_div
 
 class base():
 
@@ -219,15 +219,13 @@ class smld_x(smld):
 
         return l, {}
 
-
-class temporal_x(smld):
+class temporal(smld):
     """
     """
-    def __init__(self, sigma_max, sigma_min, sigma_type='rho', N=1000, T=1., eps=1.e-5, rho=7, continuous=True, weight_order=0, test_scalings=False, map_sigmas=False, reduce_mean=False, noisy_x0=True):
+    def __init__(self, sigma_max, sigma_min, sigma_type='rho', N=1000, T=1., eps=1.e-5, rho=7, continuous=True, weight_order=0, map_sigmas=False, reduce_mean=False, noisy_x0=True):
         super().__init__(sigma_max, sigma_min, sigma_type, N, T, eps, rho, continuous, True, reduce_mean)
         self.weight_order = weight_order
         self.map_sigmas = map_sigmas
-        self.test_scalings = test_scalings
         self.sigma_data = 0.5  # TODO: compute sigma_data with the given dataset
         self.loc = -1.5
         self.scale = 1.5
@@ -235,7 +233,7 @@ class temporal_x(smld):
 
     def get_weights(self, sigma, weight_order):
         if weight_order == 1:
-            return 1./sigma + 4.
+            return jnp.sqrt(1./sigma + 4.)
         if weight_order == 2:
             return 1./sigma**2 + 4.
         if weight_order == 0:
@@ -257,13 +255,16 @@ class temporal_x(smld):
         c_skip = self.sigma_data**2 / (sigma**2 + self.sigma_data**2)
         c_out  = sigma * self.sigma_data / jnp.sqrt(sigma**2 + self.sigma_data**2)
         c_in   = 1 / jnp.sqrt(sigma**2 + self.sigma_data**2) # a function of sigma is needed to destory the structure information of x0_t
-        return c_skip[:, jnp.newaxis, jnp.newaxis, jnp.newaxis], c_out[:, jnp.newaxis, jnp.newaxis, jnp.newaxis], c_in[:, jnp.newaxis, jnp.newaxis, jnp.newaxis]
+        return c_skip, c_out, c_in
     
     def map_sigma(self, s):
         return jnp.exp((s+self.loc)*self.scale)
 
     def sde(self, x, t):
         return super().sde(x[0], t)
+    
+    def descretize(self, x, t):
+        return super().discretize(x[0], t)
 
     def score(self, apply_fn, weights, xs, t):
         # xs is a tuple or list that contains x1_t and x0_t
@@ -271,24 +272,14 @@ class temporal_x(smld):
         # return the score of x1_t given x0_t
         x1_t, x0_t = xs
         sigma = self.sigma_at(t)
-        if self.test_scalings:
-            dif = self.denoiser_2(apply_fn, weights, x0_t, x1_t, sigma, train=False, key=None)-x1_t
-        else:
-            dif = self.denoiser(apply_fn, weights, x0_t, x1_t, sigma, train=False, key=None)-x1_t
-        return dif/sigma[:, jnp.newaxis, jnp.newaxis, jnp.newaxis]**2
+        dif = self.denoiser(apply_fn, weights, x0_t, x1_t, sigma, train=False, key=None)-x1_t
+        return batch_div(dif, sigma**2)
 
     def denoiser(self, apply_fn, weights, x0_t, x1_t, sigma, train, key):
-        c_skip, c_out, c_in = self.get_scalings(sigma)
-        x_comb = x0_t * c_out + x1_t * c_skip
-        model_output = apply_fn({'params': weights}, **{'x': c_in*x_comb, 't': sigma}, train=train, rngs={'dropout': key} if train else None)
-        return c_out * model_output + c_skip * x1_t
+        c_skip, c_out, _ = self.get_scalings(sigma)
+        model_output = apply_fn({'params': weights}, **{'x0': x0_t, 'x1':x1_t, 't': sigma}, train=train, rngs={'dropout': key} if train else None)
+        return batch_mul(c_out, model_output) + batch_mul(c_skip, x1_t)
 
-
-    def denoiser_2(self, apply_fn, weights, x0_t, x1_t, sigma, train, key):
-        c_skip, c_out, c_in = self.get_scalings(sigma)
-        x_comb = x0_t * c_out + x1_t * (1.-c_out)
-        model_output = apply_fn({'params': weights}, **{'x': c_in*x_comb, 't': sigma}, train=train, rngs={'dropout': key} if train else None)
-        return c_out * model_output + c_skip * x1_t
     
     def __call__(self, apply_fn, params, inputs, training):
         """
@@ -297,7 +288,8 @@ class temporal_x(smld):
         t is the sigma used to perturb x_0
         x1 is the clean image that x_0 is mapped to
         """
-        x0, x1, key = inputs
+        seq, key = inputs
+        x0, x1 = seq[:, :-1, ...], seq[:, 1:, ...]
 
         x_shape    = jnp.shape(x0)
         key, subkey= jax.random.split(key, 2)
@@ -312,31 +304,26 @@ class temporal_x(smld):
         else:
             sigma = self.map_sigma(jax.random.normal(key, [x_shape[0]]))
 
-        std = sigma[:, jnp.newaxis, jnp.newaxis, jnp.newaxis]
-
-        x1_t = x1 + std * z1
+        x1_t = x1 + batch_mul(sigma, z1)
         if self.noisy_x0:
             key , z_key = jax.random.split(key)
             z           = jax.random.normal(z_key, x_shape)
-            x0_t = x0 + std * z
+            x0_t = x0 + batch_mul(sigma, z)
         else:
             x0_t = x0
 
         if training:
             dropout_key, key = jax.random.split(key)
 
-        if self.test_scalings:
-            pred_x1     = self.denoiser_2(apply_fn, params, x0_t, x1_t,  sigma, train=training, key=dropout_key if training else None)
-        else:
-            pred_x1     = self.denoiser(apply_fn, params, x0_t, x1_t,  sigma, train=training, key=dropout_key if training else None)
+        pred     = self.denoiser(apply_fn, params, x0_t, x1_t,  sigma, train=training, key=dropout_key if training else None)
 
-        l2 = jnp.square(pred_x1 - x1) * self.get_weights(sigma, self.weight_order)
+        l2 = jnp.square(pred - x1) * self.get_weights(sigma, self.weight_order)
+        
 
-        reduce    = lambda tmp: jnp.mean(tmp, axis=[1,2,3]) if self.reduce_mean else jnp.sum(tmp, axis=[1,2,3])
+        reduce    = lambda tmp: jnp.mean(tmp, axis=[1,2,3,4]) if self.reduce_mean else jnp.sum(tmp, axis=[1,2,3,4])
         l = jnp.mean(reduce(l2))
 
         return l, {}
-
 
 if __name__ == '__main__':
     power_smld = smld(sigma_max=3., sigma_min=0.001, sigma_type='power', N=50, T=1., eps=1.e-5, continuous=True, weighting=False, reduce_mean=False)

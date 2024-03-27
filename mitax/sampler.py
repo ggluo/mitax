@@ -5,6 +5,7 @@ from functools import partial
 
 import jax
 import tqdm
+import einops
 
 from mitax.misc import utils
 
@@ -220,7 +221,10 @@ class PredCorrSampler(base):
             return x
 
         def norm(x):
-            return jnp.linalg.norm(x.reshape((x.shape[0], -1)), axis=-1).mean()
+            x_squared = jnp.sum(x**2, axis=(-3, -2, -1))
+            x_l2 = jnp.sqrt(x_squared)
+            x_l2_keepdims = jnp.expand_dims(jnp.expand_dims(jnp.expand_dims(x_l2, -1), -1), -1)
+            return x_l2_keepdims
     
         def corrector(x, t, k):
             grad       = self.dm.score(self.net.apply, self.net_weights, x, t)
@@ -298,7 +302,7 @@ class TemporalSampler(base):
         self.init_model(init_input, path)
         self.create_functions()
 
-    def create_functions(self, method='ancestral', target_psnr=0.2):
+    def create_functions(self, method='ancestral', target_psnr=0.2, p_steps=2):
 
         self.dm.set_d_step(self.dm.N)
 
@@ -385,8 +389,11 @@ class TemporalSampler(base):
                 return x[0]
 
             def norm(x):
-                return jnp.linalg.norm(x.reshape((x.shape[0], -1)), axis=-1).mean()
-        
+                x_squared = jnp.sum(x**2, axis=(-3, -2, -1))
+                x_l2 = jnp.sqrt(x_squared)
+                x_l2_keepdims = jnp.expand_dims(jnp.expand_dims(jnp.expand_dims(x_l2, -1), -1), -1)
+                return x_l2_keepdims
+
             def corrector(x, t, k):
                 grad       = self.dm.score(self.net.apply, self.net_weights, x, t)
                 noise      = jax.random.normal(k, jnp.shape(x[0]))
@@ -406,13 +413,12 @@ class TemporalSampler(base):
                 else:
                     x0_t        = x0_0
 
-                
                 key, subkey = jax.random.split(key)
                 x1_t = corrector([x1_t, x0_t], t, subkey)
-                
-                key, subkey = jax.random.split(key)
-                x[0] = predictor([x1_t, x0_t], t, subkey)
-                
+                for _ in range(p_steps):
+                    key, subkey = jax.random.split(key)
+                    x1_t = predictor([x1_t, x0_t], t, subkey)
+                x[0] = x1_t
                 
                 return x, None
         else:
@@ -432,24 +438,27 @@ class TemporalSampler(base):
         if save_evol:
             xs      = []
 
-        sequence = [x0]
-
         nr_sequences = jnp.shape(x_init)[0]
         x = [x_init, x0]
-        for _ in range(length-1):
+        for _ in range(length):
             for t_i in tqdm.tqdm(jnp.linspace(self.dm.T, self.dm.eps, self.dm.N)):
                 for _ in range(inner_steps):
                     self.rng_key, subkey = jax.random.split(self.rng_key)
                     x, sig = self.update_step(x, jnp.array([t_i for _ in range(nr_sequences)]), subkey)
 
+                    if ast_sampler is not None:
+                        self.rng_key, subkey = jax.random.split(self.rng_key)
+                        bt = einops.rearrange(x[0], 'b t h w c -> (b t) h w c')
+                        bt = ast_sampler.update_step(bt, jnp.array([t_i for _ in range(nr_sequences)]), subkey)[0]
+                        x[0] = einops.rearrange(bt, '(b t) h w c -> b t h w c', b=nr_sequences)
+
                     if self.cond_func is not None:
                         raise NotImplementedError
                     
-                    if ast_sampler is not None:
-                        x[0] = ast_sampler.update_step(x[0], jnp.array([t_i for _ in range(nr_sequences)]), subkey)[0]
-                    
-            sequence.append(x[0])
-        return sequence
+                    if save_evol:
+                        xs.append(x[0])
+
+        return x[0] if not save_evol else xs
 
 def progressive_sampling(sampler, Ns, sigmaxs, rhos, x_init, inner_steps=1):
 
