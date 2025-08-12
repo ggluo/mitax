@@ -1,0 +1,24 @@
+## TODO
+
+- [x] print parameters
+- [x] loss functions
+- [x] simplify dataloader and dataflow
+- [x] weight initialization
+- [x] weight normalization
+- [x] save config
+- [x] PRNG vs key https://stackoverflow.com/questions/75338838/jax-best-way-to-iterate-rngkeys
+- [x] start to add logging information
+- [x] embed rng key
+- [x] add list sum, list average
+- [x] vmap
+- [x] dropout
+- [ ] add commit stamp for installation and training models 
+- [ ] smld
+- [ ] add test modules and applications
+- [ ] parallel training on multi device
+- [ ] fully recover and save the state
+- [ ] learning schedule and optimizer
+- [ ] test interruptible training
+- [ ] notebook for sigma schedule
+- [ ] checkpoint manager
+- [ ] quantitatively evaluate the generated samples
