@@ -45,12 +45,50 @@ pip install .
 
 Requires Python >= 3.7.
 
-## Getting Started
+## Demos and Examples
 
-Check out the `examples/` directory for sample scripts:
+### Brain MRI Reconstruction
+This example demonstrates how to use MITAX for MRI reconstruction using a pre-trained diffusion model. You can find the full demo in `examples/brain/demo.ipynb`.
 
-- **MNIST Diffusion**: Run `python examples/mnist/mnist_classifier.py` or explore `examples/mnist/mnist.py`.
-- **Brain MRI**: See `examples/brain/train.py` for a training pipeline example.
+#### Core Reconstruction Workflow
+```python
+import jax
+import jax.numpy as jnp
+from mitax.sampler import AncestralSampler
+from mitax.misc import utils
+
+# Load configuration and initialize sampler
+config = utils.load_config('path/to/config.yaml')
+sampler = AncestralSampler(
+    net_name=config['net_name'],
+    net_hparams=config['net_hparams'],
+    dm_name=config['loss_name'],
+    dm_hparams=config['loss_params'],
+    target_snr=0.2,
+    init_input={'x': jnp.ones((1, 256, 256, 2)), 't': jnp.ones((1))},
+    path='path/to/model/weights'
+)
+
+# Perform reconstruction
+input_shape = (1, 256, 256, 2)
+sampler.create_functions()
+_, reconstructed_image = sampler(
+    jax.random.normal(jax.random.PRNGKey(0), input_shape) * sampler.dm.sigma_max
+)
+```
+
+### MNIST Diffusion Model
+The MNIST examples showcase score-based generative modeling (SMLD) on a simpler dataset.
+- **Training**: `python examples/mnist/mnist.py`
+- **Classifier-guided sampling**: `python examples/mnist/mnist_classifier.py`
+
+### Running the Examples
+To run the examples, ensure your `PYTHONPATH` includes the repository root:
+```bash
+export PYTHONPATH=$PYTHONPATH:$(pwd)
+# Example: Training the Brain MRI model
+python examples/brain/train.py examples/brain/smld_unet.yaml 0
+```
 
 ## License
 
